@@ -1,6 +1,7 @@
 import numpy as np
 from mnist import MNIST
 import matplotlib.pyplot as plt
+import math
 
 mndata = MNIST("Number_Samples")
 
@@ -46,53 +47,49 @@ class ConvolutionalNeuralNetwork():
         loss = -np.sum(y_true.reshape(len(y_true)) * np.log(y_pred.reshape(len(y_pred)) + epsilon))
         return loss
     
+    def convolve(self, x, f):
+        res = np.zeros((len(x)-len(f)+1, len(x[0])-len(f[0])+1))
+        for i in range(len(x)-len(f)+1):
+            for j in range(len(x[0])-len(f[0])+1):
+                res[i][j] = np.sum(np.multiply(f, x[i:i+len(f),j:j+len(f[0])]))
+        backz = np.copy(res)
+        res = [[self.ReLU(j) for j in i] for i in res]
+        return res, backz
+    
+    def maxpool(self, x, s):
+        res = np.zeros((math.ceil(len(x)/s), math.ceil(len(x[0])/2)))
+        pos = np.copy(res)
+        for i in range(0,len(x),s):
+            for j in range(0,len(x[0]),s):
+                cans = x[i:min(len(x),i+s), j:min(len(x[0]), j+s)]
+                cans = np.array([np.append(k, [0]*(s-len(k))) for k in cans]).reshape(-1)
+                res[int(i/s),int(j/s)] = max(cans)
+                pos[int(i/s),int(j/s)] = np.argmax(cans)
+        return res, pos
+
+    def unpool(self, x, s, pos, osx, osy):
+        res = np.zeros((osy,osx))
+        for i in range(len(x)):
+            for j in range(len(x[0])):
+                ri = (i*s)+(pos[i,j]//s)
+                rj = (j*s)+(pos[i,j]%s)
+                res[int(ri), int(rj)] = x[i,j]
+
+        return res
+     
     def forward(self, x):
-        x = x.reshape(28,28)
         self.ps = []
         ksout = []
         self.backz = []
         for kernel in self.kernels: #for every kernel 
-            new=[] #place to store the shrunkened result
-            newps = []
-            for yc in range(1,x.shape[1]-1): #every row that is to be kerneled
-                row = [] #to store each row of it
-                for xc in range(1,x.shape[0]-1): #the x position of that pixel that is going to be kerneled
-                    #now we have the pixel selected, so let's get to kerneling
-                    aaaa = 0
-                    for k in range(-1,2): #y offset
-                        for l in range(-1,2): #x offset
-                            res = x[yc+k][xc+l]*kernel[k+1][l+1]
-                            aaaa += res
-                    aaaa = max(aaaa, 0)
-                    row.append(aaaa)
-                new.append(row)
-            self.backz.append([[self.ReLUd(j) for j in i] for i in new])
-            nn = []
-            for i in range(0,len(new),2):
-                nr = []
-                nps =[]
-                for j in range(0,len(new[0]), 2):
-                    candids = [new[i][j]]
-                    m1 = i + 1 < len(new)
-                    m2 = j + 1 < len(new[0])
-                    if m1 and m2:
-                        candids += [new[i][j+1], new[i+1][j], new[i+1][j+1]]
-                    elif m1:
-                        candids += [0,new[i+1][j]]
-                    elif m2:
-                        candids.append(new[i][j+1])
-                    nr.append(max(candids))
-                    nps.append(np.argmax(candids))
-                nn.append(nr)
-                newps.append(nps)
-            self.ps.append(newps)
-            ksout.append(nn)
-        newx = []
-        for kernel in ksout:
-            for row in kernel:
-                newx += row
+            p, z = self.convolve(x, kernel)
+            self.backz.append(z)
+            y, ps = self.maxpool(np.array(p), 2)
+            ksout.append(y)
+            self.ps.append(ps)
+
         self.zs = []
-        self.aas = [np.array(newx).reshape(2704,1)]
+        self.aas = [np.array(ksout).reshape(2704,1)]
         for i in range(self.size):
             self.zs.append(np.array([self.biases[i][jindex] + j for jindex, j in enumerate(self.weights[i].dot(self.aas[i]))]))#self.weights[i].dot(self.aas[i]) + self.biases[i])
             if i < self.size - 1:
@@ -117,35 +114,14 @@ class ConvolutionalNeuralNetwork():
             else:
                 self.dbs[i] = self.weights[i+1].T.dot(self.dbs[i+1])*self.sigmoidd(self.zs[i])
             self.dws[i] = self.dbs[i].dot(np.array(self.aas[i]).T) #dL/dY*Xt (dactivate already factored in)
-        self.dLdP = [[[0]*26 for _ in range(26)] for _ in range(16)]
+        dLdP = []
         dLdY = np.array(self.weights[0].T.dot(self.dbs[0])).reshape(16,13,13)
-        for index, i in enumerate(dLdY):
-            for rindex, row in enumerate(i):
-                for eindex, elly in enumerate(row):
-                    relpos = self.ps[index][rindex][eindex]
-                    if relpos == 0:
-                        self.dLdP[index][rindex*2][eindex*2] = elly*self.backz[index][rindex*2][eindex*2]
-                    elif relpos == 1:
-                        self.dLdP[index][rindex*2][eindex*2+1] = elly*self.backz[index][rindex*2][eindex*2+1]
-                    elif relpos == 2:
-                        self.dLdP[index][rindex*2+1][eindex*2] = elly*self.backz[index][rindex*2+1][eindex*2]
-                    else:
-                        self.dLdP[index][rindex*2+1][eindex*2+1] = elly*self.backz[index][rindex*2+1][eindex*2+1]
+        for i, p in zip(dLdY, self.ps):
+            dLdP.append(self.unpool(i, 2, p, 26, 26))
         self.dks = []
-        for kernel in self.dLdP: #for every kernel 
-            new=[] #place to store the shrunkened result
-            for yc in range(0,3):
-                row = []
-                for xc in range(0,3):
-                    aaaa = 0
-                    for yy in range(0,26):
-                        for xx in range(0,26):
-                            aaaa += kernel[yy][xx]*x[yc+yy][xc+xx]
-                    row.append(aaaa)
-                new.append(row) 
+        for kernel in dLdP: #for every kernel 
+            new, _ = self.convolve(x, kernel)
             self.dks.append(new)
-        
-
 
     def update(self, lr):
         for i in range(self.size):
@@ -157,7 +133,7 @@ class ConvolutionalNeuralNetwork():
                     k -= self.dks[index][jindex][kindex]
 
     def descend(self, x, y, lr):
-        self.forward(np.array(x).reshape(len(x), 1))
+        self.forward(np.array(x).reshape(28, 28))
         self.backward(np.array(x).reshape(28, 28), self.oneHotter(y))
         self.update(lr)
 
@@ -212,5 +188,5 @@ class ConvolutionalNeuralNetwork():
 
 
 nn = ConvolutionalNeuralNetwork([2704,64,32,10])
-nn.train(xTrain, yTrain, 0.001, 2)
-print(str(nn.test(xTest,yTest,100)*100)+"%")
+nn.train(xTrain[:10], yTrain[:10], 0.01, 200)
+#print(str(nn.test(xTest,yTest,100)*100)+"%")
