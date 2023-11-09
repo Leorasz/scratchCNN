@@ -3,6 +3,13 @@ from mnist import MNIST
 import matplotlib.pyplot as plt
 import math
 
+"""
+If you see this, it means that I'm still working on improving this code.
+Right now, it works, but all of the dimensions are hard-coded in, so it's
+harder to change the architecture, and also you can't implement multiple
+convolutional/cross-correlation layers. This is all being worked on in a
+separate branch, and should be up soon.
+"""
 mndata = MNIST("Number_Samples")
 
 xTrain, yTrain = mndata.load_training()
@@ -47,14 +54,14 @@ class ConvolutionalNeuralNetwork():
         loss = -np.sum(y_true.reshape(len(y_true)) * np.log(y_pred.reshape(len(y_pred)) + epsilon))
         return loss
     
-    def convolve(self, x, f):
+    def validCrossCorr(self, x, f):
         res = np.zeros((len(x)-len(f)+1, len(x[0])-len(f[0])+1))
         for i in range(len(x)-len(f)+1):
             for j in range(len(x[0])-len(f[0])+1):
                 res[i][j] = np.sum(np.multiply(f, x[i:i+len(f),j:j+len(f[0])]))
         backz = np.copy(res)
         res = [[self.ReLU(j) for j in i] for i in res]
-        return res, backz
+        return res, backz #need to store pre-relu for backprop
     
     def maxpool(self, x, s):
         res = np.zeros((math.ceil(len(x)/s), math.ceil(len(x[0])/2)))
@@ -74,7 +81,6 @@ class ConvolutionalNeuralNetwork():
                 ri = (i*s)+(pos[i,j]//s)
                 rj = (j*s)+(pos[i,j]%s)
                 res[int(ri), int(rj)] = x[i,j]
-
         return res
      
     def forward(self, x):
@@ -82,7 +88,7 @@ class ConvolutionalNeuralNetwork():
         ksout = []
         self.backz = []
         for kernel in self.kernels: #for every kernel 
-            p, z = self.convolve(x, kernel)
+            p, z = self.validCrossCorr(x, kernel)
             self.backz.append(z)
             y, ps = self.maxpool(np.array(p), 2)
             ksout.append(y)
@@ -120,7 +126,7 @@ class ConvolutionalNeuralNetwork():
             dLdP.append(self.unpool(i, 2, p, 26, 26))
         self.dks = []
         for kernel in dLdP: #for every kernel 
-            new, _ = self.convolve(x, kernel)
+            new, _ = self.validCrossCorr(x, kernel)
             self.dks.append(new)
 
     def update(self, lr):
