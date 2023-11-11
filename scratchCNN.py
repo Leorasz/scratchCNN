@@ -67,6 +67,10 @@ class ConvolutionalNeuralNetwork():
         if pp:
             print(x)
             print(f)
+            print(len(x))
+            print(len(f))
+            print(len(x[0]))
+            print(len(f[0]))
         res = np.zeros((len(x)-len(f)+1, len(x[0])-len(f[0])+1))
         for i in range(len(x)-len(f)+1):
             for j in range(len(x[0])-len(f[0])+1):
@@ -84,7 +88,7 @@ class ConvolutionalNeuralNetwork():
         return res
     
     def maxpool(self, x, s):
-        res = np.zeros((math.ceil(len(x)/s), math.ceil(len(x[0])/2)))
+        res = np.zeros((math.ceil(len(x)/s), math.ceil(len(x[0])/s)))
         pos = np.copy(res)
         for i in range(0,len(x),s):
             for j in range(0,len(x[0]),s):
@@ -119,7 +123,8 @@ class ConvolutionalNeuralNetwork():
                 zinp = []
                 pinp = []
                 ksi = []
-                for inp in self.ksout[-1]: #for every input from the previous layer
+                lastLayerOut = np.array(self.ksout[-1]).reshape(-1, *np.array(self.ksout[-1]).shape[2:])
+                for inp in lastLayerOut: #for every input from the previous layer
                     p, z = self.validCrossCorr(inp, kernel) #product and zstore of the crosscorrelation
                     zinp.append(z) #intermediate zstore
                     y, ps = self.maxpool(np.array(p), self.convarch[ln][2]) #maxpool the output, store positions
@@ -141,7 +146,6 @@ class ConvolutionalNeuralNetwork():
                 self.aas.append(self.sigmoid(self.zs[i]))
     
     def backward(self, y):
-        print(np.array(self.ksout[0]).shape)
         self.dws = [0]*self.size
         self.dbs = [0]*self.size
         for i in range(self.size-1,-1,-1):
@@ -158,19 +162,21 @@ class ConvolutionalNeuralNetwork():
         for ln in range(len(self.kernels)-1,-1,-1): #for every layer, to backprop
             dl = [] #stores dks for layer
             dd = {} #stores dxs for layer, use dictionary because does the for loops but opposite
-            for ki, kernel in enumerate(dLdY): #for every kernel that acted on the last inputs
-                gradient = np.zeros(kernel[0].shape)
-                for ii, inp in enumerate(kernel): #for every input that was acted on by the kernels
-                    p = self.unpool(dLdY[ki][ii], self.convarch[ln][2], self.ps[ln][ki][ii], self.poutsizes[ln][0], self.poutsizes[ln][1])
+            for ki, kernel in enumerate(dLdY):
+                gradient = np.zeros((self.convarch[ln][1], self.convarch[ln][1]))
+                lastLayerOut = np.array(self.ksout[ln]).reshape(-1, *np.array(self.ksout[ln]).shape[2:]) 
+                for ii, inp in enumerate(lastLayerOut):
+                    p = self.unpool(kernel[ii], self.convarch[ln][2], self.ps[ln][ki][ii], self.poutsizes[ln][0], self.poutsizes[ln][1])
                     z = p*self.backz[ln][ki][ii]
-                    gradient += self.validCrossCorr(self.ksout[ln][ki][ii], z, pp=True) #gradient is sum of all of them
+                    corres, _ = self.validCrossCorr(inp, z) #gradient is sum of all of them
+                    gradient += corres
                     if ln != 0: #no point if last layer
                         #compute new dLdXs
-                        dd[ii] = dd.get(ii, np.zeros((self.outsizes[ln-1][0], self.outsizes[ln-1][1]))) + self.fullConvolve(z, self.kernels)
+                        dd[ii] = dd.get(ii, np.zeros((self.outsizes[ln][0], self.outsizes[ln][1]))) + self.fullConvolve(z, self.kernels[ln][ki]) 
                 dl.append(gradient)
-            self.dks.append(dl)
+            self.dks.insert(0,dl)
             if ln != 0: #sets new dxs
-                dLdY = np.array(list(dd.values())).reshape(self.convarch[ln-1][0], -1, self.outsizes[ln-1][0], self.outsizes[ln-1][1])
+                dLdY = np.array(list(dd.values())).reshape(self.convarch[ln-1][0], -1, self.outsizes[ln][0], self.outsizes[ln][1])
                 
 
     def update(self, lr):
@@ -202,7 +208,7 @@ class ConvolutionalNeuralNetwork():
                 print("Iteration number " + str(i+1))
                 if np.argmax(self.aas[-1]) == y[i]:
                     correct += 1
-                if i % 10 == 0:
+                if i % 10 == 9:
                     losses.append(loss/10)
                     print("Avg loss is ", loss/10)
                     accuracies.append(correct/10)
@@ -237,6 +243,6 @@ class ConvolutionalNeuralNetwork():
         return correct/iter 
 
 #[[amount of kernels, kernel size, pool size]]
-nn = ConvolutionalNeuralNetwork([28,28],[[16,3,2]],[64,32,10])
+nn = ConvolutionalNeuralNetwork([28,28],[[16,4,3],[8,3,2]],[64,32,10])
 nn.train(xTrain[:10], yTrain[:10], 0.01, 200)
 #print(str(nn.test(xTest,yTest,100)*100)+"%")
