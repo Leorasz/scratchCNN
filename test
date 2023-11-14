@@ -1,16 +1,1 @@
-import numpy as np
-import math
-def maxpool(x, s):
-        res = np.zeros((math.ceil(len(x)/s), math.ceil(len(x[0])/2)))
-        pos = np.copy(res)
-        for i in range(0,len(x),s):
-            for j in range(0,len(x[0]),s):
-                cans = x[i:min(len(x),i+s), j:min(len(x[0]), j+s)]
-                cans = np.array([np.append(k, [0]*(s-len(k))) for k in cans]).reshape(-1)
-                res[int(i/s),int(j/s)] = max(cans)
-                pos[int(i/s),int(j/s)] = np.argmax(cans)
-        return res, pos
 
-x = np.random.rand(25,25)
-r, _ = maxpool(x, 3)
-print(r.shape)
